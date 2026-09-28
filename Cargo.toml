@@ -1,0 +1,22 @@
+# Its own workspace, like mapping_server/devops/msd: this crate is not part of
+# any cargo tree above it, and without this marker cargo walks up and adopts
+# whatever it finds (the repo root's Cargo.toml).
+[workspace]
+
+[package]
+name = "crb"
+version = "0.1.0"
+edition = "2021"
+description = "cartographer release build — Cartographer and its dependencies from source, packed as release tarballs"
+publish = false
+
+[[bin]]
+name = "crb"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+strip = true

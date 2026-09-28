@@ -241,17 +241,25 @@ fn build_cartographer(context: &Context, options: &Options) -> Result<()> {
     )
 }
 
-/// The mapping server's two patches (mapping_server/cartographer/build.sh).
+/// The mapping server's two patches (mapping_server/cartographer/build.sh),
+/// and one for the installed CMake package.
 const WERROR_UNINITIALIZED: &str = r#"google_add_flag(GOOG_CXX_FLAGS "-Werror=uninitialized")"#;
 const WNO_ERROR: &str = r#"
     google_add_flag(GOOG_CXX_FLAGS "-Wno-error=maybe-uninitialized")
     google_add_flag(GOOG_CXX_FLAGS "-Wno-error=uninitialized")"#;
 const CERES_WITH_SUITESPARSE: &str = "find_package(Ceres REQUIRED COMPONENTS SuiteSparse)";
 const CERES_PLAIN: &str = "find_package(Ceres REQUIRED)";
+const CERES_INCLUDE: &str = "target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC\n  \"${CERES_INCLUDE_DIRS}\")\n";
 
 /// Newer GCC flags Eigen with -Wmaybe-uninitialized false positives that
 /// -Werror=uninitialized makes fatal; and Ceres above is built without
 /// SuiteSparse, which Cartographer only asks for as a performance component.
+///
+/// Ceres 2.x no longer sets CERES_INCLUDE_DIRS, so Cartographer's include of it
+/// is an empty path, which CMake reads as Cartographer's source directory and
+/// exports into CartographerTargets.cmake. Anything linking the installed
+/// package then fails to configure, the build machine's path not existing on
+/// it. Ceres::ceres, linked on the next line, carries Ceres's includes anyway.
 ///
 /// Each patch must apply. A new pin whose text differs would otherwise build
 /// unpatched and fail an hour later, somewhere else.
@@ -262,11 +270,13 @@ fn patch_cartographer(context: &Context) -> Result<()> {
     if context.runner.dry_run {
         println!("   patch {} (-Wno-error=uninitialized)", functions.display());
         println!("   patch {} (Ceres without SuiteSparse)", lists.display());
+        println!("   patch {} (no CERES_INCLUDE_DIRS)", lists.display());
         return Ok(());
     }
     for (path, patch) in [
         (&functions, add_wno_error as fn(&str) -> Result<String>),
         (&lists, drop_suitesparse),
+        (&lists, drop_ceres_include),
     ] {
         let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let patched = patch(&text).with_context(|| format!("patching {}", path.display()))?;
@@ -287,6 +297,13 @@ fn drop_suitesparse(text: &str) -> Result<String> {
         bail!("no `{CERES_WITH_SUITESPARSE}` to replace");
     }
     Ok(text.replacen(CERES_WITH_SUITESPARSE, CERES_PLAIN, 1))
+}
+
+fn drop_ceres_include(text: &str) -> Result<String> {
+    if !text.contains(CERES_INCLUDE) {
+        bail!("no include of CERES_INCLUDE_DIRS to remove");
+    }
+    Ok(text.replacen(CERES_INCLUDE, "", 1))
 }
 
 pub fn elapsed(started: Instant) -> String {
@@ -325,5 +342,13 @@ mod tests {
         assert_eq!(patched, "find_package(Ceres REQUIRED)\n");
         assert!(drop_suitesparse("find_package(Ceres REQUIRED)\n").is_err());
         assert!(add_wno_error("nothing here").is_err());
+    }
+
+    #[test]
+    fn ceres_include_is_dropped_and_a_missing_one_is_an_error() {
+        let text = "a\ntarget_include_directories(${PROJECT_NAME} SYSTEM PUBLIC\n  \"${CERES_INCLUDE_DIRS}\")\ntarget_link_libraries(${PROJECT_NAME} PUBLIC ${CERES_LIBRARIES})\n";
+        let patched = drop_ceres_include(text).unwrap();
+        assert_eq!(patched, "a\ntarget_link_libraries(${PROJECT_NAME} PUBLIC ${CERES_LIBRARIES})\n");
+        assert!(drop_ceres_include(&patched).is_err());
     }
 }

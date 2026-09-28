@@ -87,11 +87,15 @@ every platform.
 4. **Builds abseil, protobuf, Ceres and Cartographer, in that order.**
    - Each is fetched as a single commit at its pin.
    - Each is built as Release (`-O3 -DNDEBUG`), static, `-fPIC`, C++17.
-5. **Patches Cartographer twice:**
+5. **Patches Cartographer three times:**
    - adds `-Wno-error=maybe-uninitialized`, for GCC's false positives in Eigen;
-   - builds against Ceres without SuiteSparse.
+   - builds against Ceres without SuiteSparse;
+   - drops its include of `CERES_INCLUDE_DIRS`. Ceres 2.x no longer sets that
+     variable, so the include becomes Cartographer's source directory, and the
+     installed CMake package then points at a path that exists only on the
+     build machine. Anything configured against it fails.
 
-   **If either patch doesn't apply, the build stops.** Only the library and the
+   **If any patch doesn't apply, the build stops.** Only the library and the
    four tools its install step needs are built; the test targets are skipped.
 6. **Writes `VERSION`, both tarballs and their `.sha256`s.**
 7. **Runs `verify`.**
@@ -162,7 +166,7 @@ Covers:
 - reading the platform from `/etc/os-release`;
 - writing and reading back `VERSION`;
 - turning install manifests into tarball paths;
-- both Cartographer patches;
+- all three Cartographer patches;
 - the jobs and low-memory defaults;
 - the memory arithmetic;
 - how commands are quoted for display.
